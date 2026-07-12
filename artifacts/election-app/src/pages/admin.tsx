@@ -14,8 +14,10 @@ import {
   updateDoc, 
   addDoc, 
   deleteDoc,
+  getDocs,
   query,
-  orderBy
+  orderBy,
+  writeBatch
 } from 'firebase/firestore';
 import { ElectionState, Post, Candidate, Booth } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -40,7 +42,10 @@ import {
   BoxSelect,
   X,
   CheckCircle2,
-  ImageIcon
+  ImageIcon,
+  RotateCcw,
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
@@ -148,6 +153,47 @@ export default function AdminPage() {
         await setDoc(doc(db, 'posts', p.id), p);
       }
       toast({ title: 'Posts Initialized' });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  // Reset a single closed post back to pending, zero out all its candidate votes
+  const handleRerun = async (postId: string, postTitle: string) => {
+    if (!confirm(`Re-run "${postTitle}"?\n\nThis will reset its status to pending and clear all vote counts for that post. This cannot be undone.`)) return;
+    try {
+      const batch = writeBatch(db);
+      // Reset post status
+      batch.update(doc(db, 'posts', postId), { status: 'pending' });
+      // If this post was somehow still the active post, clear it
+      if (election?.activePostId === postId) {
+        batch.set(doc(db, 'election', 'state'), { activePostId: null }, { merge: true });
+      }
+      // Zero out all candidate vote counts
+      const candidatesSnap = await getDocs(collection(db, 'posts', postId, 'candidates'));
+      candidatesSnap.forEach(c => batch.update(c.ref, { voteCount: 0 }));
+      await batch.commit();
+      toast({ title: `"${postTitle}" reset to pending — votes cleared.` });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  // Reset the entire election: all posts back to pending, all votes zeroed, election closed
+  const handleResetElection = async () => {
+    if (!confirm('Reset the ENTIRE election?\n\nAll posts will return to pending, all vote counts will be cleared, and the election will be closed.\n\nThis cannot be undone.')) return;
+    try {
+      const batch = writeBatch(db);
+      // Close the election
+      batch.set(doc(db, 'election', 'state'), { isOpen: false, activePostId: null });
+      // Reset every post and its candidates
+      for (const post of posts) {
+        batch.update(doc(db, 'posts', post.id), { status: 'pending' });
+        const candidatesSnap = await getDocs(collection(db, 'posts', post.id, 'candidates'));
+        candidatesSnap.forEach(c => batch.update(c.ref, { voteCount: 0 }));
+      }
+      await batch.commit();
+      toast({ title: 'Election fully reset — all posts are pending and votes cleared.' });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     }
@@ -298,16 +344,29 @@ export default function AdminPage() {
           {/* ELECTION SEQUENCE TAB */}
           <TabsContent value="election" className="mt-6">
             <Card className="border-0 shadow-sm">
-              <CardHeader className="bg-slate-50 border-b border-slate-100 rounded-t-xl flex flex-row items-center justify-between">
+              <CardHeader className="bg-slate-50 border-b border-slate-100 rounded-t-xl flex flex-row items-center justify-between gap-4">
                 <div>
                   <CardTitle className="flex items-center gap-3 text-xl">
                     <Settings className="w-5 h-5 text-primary" /> Election Sequence
                   </CardTitle>
                   <CardDescription className="mt-1">Progress through each post one at a time.</CardDescription>
                 </div>
-                {posts.length === 0 && (
-                  <Button onClick={handleInitPosts} data-testid="button-init-posts">Initialize Default Posts</Button>
-                )}
+                <div className="flex items-center gap-2 shrink-0">
+                  {posts.length === 0 && (
+                    <Button onClick={handleInitPosts} data-testid="button-init-posts">Initialize Default Posts</Button>
+                  )}
+                  {posts.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-rose-300 text-rose-700 hover:bg-rose-50 hover:border-rose-400 font-semibold"
+                      onClick={handleResetElection}
+                      data-testid="button-reset-election"
+                    >
+                      <RefreshCw className="w-4 h-4 mr-1.5" /> Reset Entire Election
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="divide-y divide-slate-100">
@@ -352,9 +411,20 @@ export default function AdminPage() {
                             </Button>
                           )}
                           {isClosed && (
-                            <div className="flex items-center gap-2 text-slate-400">
-                              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                              <span className="text-sm font-medium">Done</span>
+                            <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-1.5 text-slate-400">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                                <span className="text-sm font-medium">Done</span>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-amber-300 text-amber-700 hover:bg-amber-50 hover:border-amber-400"
+                                onClick={() => handleRerun(post.id, post.title)}
+                                data-testid={`button-rerun-${post.id}`}
+                              >
+                                <RotateCcw className="w-3.5 h-3.5 mr-1.5" /> Re-run
+                              </Button>
                             </div>
                           )}
                         </div>
