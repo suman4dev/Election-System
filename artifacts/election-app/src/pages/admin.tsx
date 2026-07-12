@@ -147,12 +147,68 @@ export default function AdminPage() {
       { id: "post-09", title: "Literary Captain", order: 9, status: "pending" },
       { id: "post-10", title: "Vice Literary Captain", order: 10, status: "pending" }
     ];
-
     try {
       for (const p of defaultPosts) {
         await setDoc(doc(db, 'posts', p.id), p);
       }
-      toast({ title: 'Posts Initialized' });
+      toast({ title: 'Default posts loaded' });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  const handleAddPost = async (title: string) => {
+    if (!title.trim()) return;
+    try {
+      const nextOrder = posts.length > 0 ? Math.max(...posts.map(p => p.order)) + 1 : 1;
+      const paddedNum = String(nextOrder).padStart(2, '0');
+      await setDoc(doc(db, 'posts', `post-${paddedNum}-${Date.now()}`), {
+        title: title.trim(),
+        order: nextOrder,
+        status: 'pending'
+      });
+      toast({ title: `"${title.trim()}" added to the ballot` });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  const handleDeletePost = async (postId: string, postTitle: string) => {
+    if (!confirm(`Delete "${postTitle}" and all its candidates?\n\nThis cannot be undone.`)) return;
+    try {
+      const batch = writeBatch(db);
+      const candidatesSnap = await getDocs(collection(db, 'posts', postId, 'candidates'));
+      candidatesSnap.forEach(c => batch.delete(c.ref));
+      batch.delete(doc(db, 'posts', postId));
+      await batch.commit();
+      toast({ title: `"${postTitle}" deleted` });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  const handleAddBooth = async () => {
+    try {
+      const nums = booths.map(b => {
+        const m = b.id.match(/^booth-(\d+)$/);
+        return m ? parseInt(m[1]) : 0;
+      });
+      const nextNum = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+      await setDoc(doc(db, 'booths', `booth-${nextNum}`), { unlocked: false });
+      toast({ title: `Booth ${nextNum} added` });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  const handleDeleteBooth = async (boothId: string) => {
+    if (booths.length <= 3) {
+      toast({ title: 'Minimum 3 booths required', variant: 'destructive' }); return;
+    }
+    if (!confirm(`Delete "${boothId}"?`)) return;
+    try {
+      await deleteDoc(doc(db, 'booths', boothId));
+      toast({ title: `${boothId} removed` });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     }
@@ -306,11 +362,16 @@ export default function AdminPage() {
           {/* BOOTHS TAB */}
           <TabsContent value="control" className="mt-6">
             <Card className="border-0 shadow-sm">
-              <CardHeader className="bg-slate-50 border-b border-slate-100 rounded-t-xl">
-                <CardTitle className="flex items-center gap-3 text-xl">
-                  <BoxSelect className="w-5 h-5 text-primary" /> Voting Booths
-                </CardTitle>
-                <CardDescription>Control booth lock status. Booths auto-unlock 5 seconds after each vote.</CardDescription>
+              <CardHeader className="bg-slate-50 border-b border-slate-100 rounded-t-xl flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-3 text-xl">
+                    <BoxSelect className="w-5 h-5 text-primary" /> Voting Booths
+                  </CardTitle>
+                  <CardDescription>Minimum 3 booths. Auto-unlock 5 s after each vote.</CardDescription>
+                </div>
+                <Button size="sm" onClick={handleAddBooth} data-testid="button-add-booth">
+                  <Plus className="w-4 h-4 mr-1.5" /> Add Booth
+                </Button>
               </CardHeader>
               <CardContent className="p-6">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -318,9 +379,21 @@ export default function AdminPage() {
                     <div key={booth.id} className={`p-5 rounded-xl border-2 transition-all ${booth.unlocked ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
                       <div className="flex items-center justify-between mb-4">
                         <span className="font-bold text-lg text-slate-900 uppercase tracking-widest">{booth.id}</span>
-                        {booth.unlocked
-                          ? <Badge className="bg-emerald-500 text-white border-0">Unlocked</Badge>
-                          : <Badge variant="outline" className="text-slate-500 border-slate-300">Locked</Badge>}
+                        <div className="flex items-center gap-2">
+                          {booth.unlocked
+                            ? <Badge className="bg-emerald-500 text-white border-0">Unlocked</Badge>
+                            : <Badge variant="outline" className="text-slate-500 border-slate-300">Locked</Badge>}
+                          {booths.length > 3 && (
+                            <button
+                              className="text-slate-300 hover:text-rose-500 transition-colors"
+                              onClick={() => handleDeleteBooth(booth.id)}
+                              title="Remove booth"
+                              data-testid={`button-delete-${booth.id}`}
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="flex gap-2">
                         <Button size="sm" className="flex-1" disabled={booth.unlocked}
@@ -351,10 +424,15 @@ export default function AdminPage() {
                   </CardTitle>
                   <CardDescription className="mt-1">Progress through each post one at a time.</CardDescription>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {posts.length === 0 && (
-                    <Button onClick={handleInitPosts} data-testid="button-init-posts">Initialize Default Posts</Button>
-                  )}
+                <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleInitPosts}
+                    data-testid="button-init-posts"
+                  >
+                    <Plus className="w-4 h-4 mr-1.5" /> Load Defaults
+                  </Button>
                   {posts.length > 0 && (
                     <Button
                       variant="outline"
@@ -363,7 +441,7 @@ export default function AdminPage() {
                       onClick={handleResetElection}
                       data-testid="button-reset-election"
                     >
-                      <RefreshCw className="w-4 h-4 mr-1.5" /> Reset Entire Election
+                      <RefreshCw className="w-4 h-4 mr-1.5" /> Reset Election
                     </Button>
                   )}
                 </div>
@@ -389,16 +467,28 @@ export default function AdminPage() {
                             </div>
                           </div>
                         </div>
-                        <div>
+                        <div className="flex items-center gap-2">
                           {post.status === 'pending' && !anyActive && (
-                            <Button size="sm" className="font-bold uppercase tracking-wider"
-                              onClick={async () => {
-                                await updateDoc(doc(db, 'posts', post.id), { status: 'active' });
-                                await setDoc(doc(db, 'election', 'state'), { activePostId: post.id }, { merge: true });
-                              }}
-                              data-testid={`button-start-${post.id}`}>
-                              <Play className="w-4 h-4 mr-1.5" /> Start Voting
-                            </Button>
+                            <>
+                              <Button size="sm" className="font-bold uppercase tracking-wider"
+                                onClick={async () => {
+                                  await updateDoc(doc(db, 'posts', post.id), { status: 'active' });
+                                  await setDoc(doc(db, 'election', 'state'), { activePostId: post.id }, { merge: true });
+                                }}
+                                data-testid={`button-start-${post.id}`}>
+                                <Play className="w-4 h-4 mr-1.5" /> Start Voting
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-slate-300 hover:text-rose-500 hover:bg-rose-50"
+                                onClick={() => handleDeletePost(post.id, post.title)}
+                                data-testid={`button-delete-post-${post.id}`}
+                                title="Delete post"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </>
                           )}
                           {isActive && (
                             <Button variant="destructive" size="sm" className="font-bold uppercase tracking-wider"
@@ -434,10 +524,12 @@ export default function AdminPage() {
                   {posts.length === 0 && (
                     <div className="p-12 text-center text-slate-400">
                       <Settings className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                      <p className="font-medium">No posts yet. Click "Initialize Default Posts" to set up the 10 council positions.</p>
+                      <p className="font-medium">No posts yet. Use "Load Defaults" or add one below.</p>
                     </div>
                   )}
                 </div>
+                {/* Add Post inline form */}
+                <AddPostForm onAdd={handleAddPost} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -694,6 +786,43 @@ function CandidateManager({ posts }: { posts: Post[] }) {
           <p className="font-medium">Initialize posts first from the Election tab.</p>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Add Post inline form ─────────────────────────────────────────────────────
+function AddPostForm({ onAdd }: { onAdd: (title: string) => Promise<void> }) {
+  const [title, setTitle] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!title.trim() || busy) return;
+    setBusy(true);
+    await onAdd(title);
+    setTitle('');
+    setBusy(false);
+  };
+
+  return (
+    <div className="border-t border-slate-100 p-4 bg-slate-50/60 flex items-center gap-3">
+      <div className="flex-1">
+        <Input
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          placeholder="New post title (e.g. Cultural Secretary)…"
+          className="bg-white h-10"
+          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+          data-testid="input-new-post-title"
+        />
+      </div>
+      <Button
+        size="sm"
+        onClick={handleSubmit}
+        disabled={!title.trim() || busy}
+        data-testid="button-add-post"
+      >
+        <Plus className="w-4 h-4 mr-1.5" /> Add Post
+      </Button>
     </div>
   );
 }
