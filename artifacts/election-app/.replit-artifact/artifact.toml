@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "M.S. Kawar Int. School Council Election"
+version = "1.0.0"
+id = "artifacts/election-app"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20835
+
+[services.development]
+run = "pnpm --filter @workspace/election-app run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/election-app", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/election-app/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20835"
+BASE_PATH = "/"
