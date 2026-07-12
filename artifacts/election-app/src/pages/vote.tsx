@@ -1,20 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'wouter';
 import { db, auth } from '@/lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
-import { doc, onSnapshot, collection, runTransaction, increment, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, collection, runTransaction, increment, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { ElectionState, Booth, Candidate } from '@/lib/types';
-import { Lock, CheckCircle2, ShieldAlert, AlertCircle } from 'lucide-react';
+import { Lock, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { Card } from '@/components/ui/card';
-import { useToast } from '@/hooks/use-toast';
+
+const COOLDOWN_SECONDS = 5;
 
 export default function VotePage() {
   const { boothId } = useParams<{ boothId: string }>();
   const [election, setElection] = useState<ElectionState | null>(null);
   const [booth, setBooth] = useState<Booth | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [voted, setVoted] = useState(false);
-  const { toast } = useToast();
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Auth silently
   useEffect(() => {
@@ -25,7 +26,6 @@ export default function VotePage() {
   useEffect(() => {
     if (!boothId) return;
 
-    // Election state listener
     const unsubElection = onSnapshot(doc(db, 'election', 'state'), (docSnap) => {
       if (docSnap.exists()) {
         setElection(docSnap.data() as ElectionState);
@@ -34,12 +34,9 @@ export default function VotePage() {
       }
     });
 
-    // Booth listener
     const unsubBooth = onSnapshot(doc(db, 'booths', boothId), (docSnap) => {
       if (docSnap.exists()) {
-        const b = docSnap.data() as Booth;
-        setBooth(b);
-        if (b.unlocked) setVoted(false); // Reset voted state when booth is unlocked
+        setBooth(docSnap.data() as Booth);
       } else {
         setBooth(null);
       }
@@ -69,14 +66,39 @@ export default function VotePage() {
     return () => unsubCandidates();
   }, [election?.activePostId]);
 
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, []);
+
+  const startCooldown = () => {
+    setCountdown(COOLDOWN_SECONDS);
+    countdownRef.current = setInterval(() => {
+      setCountdown(prev => {
+        if (prev === null || prev <= 1) {
+          clearInterval(countdownRef.current!);
+          countdownRef.current = null;
+          // Auto-unlock the booth after cooldown
+          if (boothId) {
+            updateDoc(doc(db, 'booths', boothId), { unlocked: true }).catch(console.error);
+          }
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
   const handleVote = async (candidateId: string) => {
-    if (!election?.activePostId || !boothId || !booth?.unlocked) return;
+    if (!election?.activePostId || !boothId || !booth?.unlocked || countdown !== null) return;
 
     try {
       await runTransaction(db, async (tx) => {
         const boothRef = doc(db, 'booths', boothId);
         const boothSnap = await tx.get(boothRef);
-        
+
         if (!boothSnap.exists() || !boothSnap.data().unlocked) {
           throw new Error('Booth is locked');
         }
@@ -86,23 +108,25 @@ export default function VotePage() {
         tx.update(boothRef, { unlocked: false, lastVoteAt: serverTimestamp() });
       });
 
-      setVoted(true);
-      setTimeout(() => {
-        setVoted(false);
-      }, 4000);
+      startCooldown();
     } catch (error: any) {
-      // Race condition handled: silently ignore or show toast
-      console.error("Vote failed:", error);
+      console.error('Vote failed:', error);
     }
   };
 
   // Rendering states
-  if (voted) {
+  if (countdown !== null) {
     return (
       <div className="min-h-screen bg-primary flex flex-col items-center justify-center text-primary-foreground p-6">
-        <CheckCircle2 className="w-32 h-32 mb-8 text-accent animate-in zoom-in" />
+        <CheckCircle2 className="w-32 h-32 mb-8 text-accent animate-in zoom-in duration-300" />
         <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-4 text-center">Thank You for Voting!</h1>
-        <p className="text-xl md:text-2xl text-primary-foreground/80">Your ballot has been securely recorded.</p>
+        <p className="text-xl md:text-2xl text-primary-foreground/70 mb-12">Your ballot has been securely recorded.</p>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-24 h-24 rounded-full border-4 border-primary-foreground/30 flex items-center justify-center">
+            <span className="text-5xl font-bold font-mono text-accent">{countdown}</span>
+          </div>
+          <p className="text-primary-foreground/60 text-lg tracking-wide uppercase">Next voter ready in…</p>
+        </div>
       </div>
     );
   }

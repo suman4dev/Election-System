@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { db } from '@/lib/firebase';
-import { doc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
+import { doc, onSnapshot, collection } from 'firebase/firestore';
 import { ElectionState, Post, Candidate } from '@/lib/types';
 import { Shield, Users, BarChart3, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -44,13 +44,15 @@ export default function ResultsPage() {
     return () => unsub();
   }, [election?.activePostId]);
 
-  // Listen to closed posts
+  // Listen to all posts, filter closed ones client-side (avoids composite index requirement)
   useEffect(() => {
-    const q = query(collection(db, 'posts'), where('status', '==', 'closed'), orderBy('order'));
-    const unsub = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Post));
+    const unsub = onSnapshot(collection(db, 'posts'), (snapshot) => {
+      const data = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() } as Post))
+        .filter(p => p.status === 'closed')
+        .sort((a, b) => a.order - b.order);
       setClosedPosts(data);
-      
+
       // Select first closed post by default if nothing selected and no active post
       if (data.length > 0 && !selectedClosedPostId && !election?.activePostId) {
         setSelectedClosedPostId(data[0].id);
