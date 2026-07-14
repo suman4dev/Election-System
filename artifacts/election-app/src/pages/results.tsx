@@ -170,7 +170,7 @@ export default function ResultsPage() {
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <header className="bg-white border-b border-slate-200 py-6 px-8 sticky top-0 z-50 shadow-sm flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Shield className="w-10 h-10 text-primary" />
+          <img src="/mskawarlogo.jpg" alt="M.S. Kawar logo" className="w-10 h-10 object-contain rounded-md bg-white/90 p-1" />
           <div>
             <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase">M.S. Kawar</h1>
             <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Election Results</p>
