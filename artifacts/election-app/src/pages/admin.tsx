@@ -27,7 +27,6 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { 
-  Shield, 
   Power, 
   Lock, 
   Unlock, 
@@ -263,7 +262,7 @@ export default function AdminPage() {
         <Card className="w-full max-w-md shadow-2xl border-0">
           <CardHeader className="space-y-3 bg-primary text-primary-foreground rounded-t-xl p-8 pb-10">
             <div className="flex items-center justify-center mb-4">
-              <Shield className="w-12 h-12 text-accent" />
+              <img src="/mskawarlogo.jpg" alt="M.S. Kawar logo" className="w-16 h-16 object-contain rounded-lg bg-white/90 p-2" />
             </div>
             <CardTitle className="text-center text-3xl font-black tracking-tight">Admin Portal</CardTitle>
             <CardDescription className="text-center text-primary-foreground/80 text-lg">M.S. Kawar Election System</CardDescription>
@@ -304,9 +303,9 @@ export default function AdminPage() {
     <div className="min-h-screen bg-slate-100 font-sans">
       <header className="bg-primary text-primary-foreground p-5 shadow-md flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-4">
-          <Shield className="w-8 h-8 text-accent" />
+          <img src="/mskawarlogo.jpg" alt="M.S. Kawar logo" className="w-10 h-10 object-contain rounded-md bg-white/90 p-1" />
           <div>
-            <h1 className="text-xl font-bold tracking-wide uppercase">M.S. Kawar Election Control</h1>
+            <h1 className="text-xl font-bold tracking-wide uppercase">M. S. Kawar International School</h1>
             <p className="text-xs text-primary-foreground/70 font-mono">AUTHORIZED PERSONNEL ONLY</p>
           </div>
         </div>
