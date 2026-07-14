@@ -81,7 +81,7 @@ export default function AdminPage() {
       if (docSnap.exists()) {
         setElection(docSnap.data() as ElectionState);
       } else {
-        setElection({ isOpen: false, activePostId: null });
+        setElection({ isOpen: false });
       }
     });
 
@@ -101,7 +101,7 @@ export default function AdminPage() {
     // Initialize booths if they don't exist
     const initBooths = async () => {
       for (const id of ['booth-1', 'booth-2', 'booth-3']) {
-        await setDoc(doc(db, 'booths', id), { unlocked: false }, { merge: true });
+        await setDoc(doc(db, 'booths', id), { unlocked: false, assignedPostId: null }, { merge: true });
       }
     };
     initBooths();
@@ -120,6 +120,15 @@ export default function AdminPage() {
       toast({ title: 'Logged in successfully' });
     } catch (err: any) {
       toast({ title: 'Login Failed', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  const handleAssignPost = async (boothId: string, postId: string | null) => {
+    try {
+      await updateDoc(doc(db, 'booths', boothId), { assignedPostId: postId ?? null });
+      toast({ title: postId ? `Post assigned to ${boothId}` : `${boothId} unassigned` });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
     }
   };
 
@@ -193,7 +202,7 @@ export default function AdminPage() {
         return m ? parseInt(m[1]) : 0;
       });
       const nextNum = nums.length > 0 ? Math.max(...nums) + 1 : 1;
-      await setDoc(doc(db, 'booths', `booth-${nextNum}`), { unlocked: false });
+      await setDoc(doc(db, 'booths', `booth-${nextNum}`), { unlocked: false, assignedPostId: null });
       toast({ title: `Booth ${nextNum} added` });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -220,10 +229,6 @@ export default function AdminPage() {
       const batch = writeBatch(db);
       // Reset post status
       batch.update(doc(db, 'posts', postId), { status: 'pending' });
-      // If this post was somehow still the active post, clear it
-      if (election?.activePostId === postId) {
-        batch.set(doc(db, 'election', 'state'), { activePostId: null }, { merge: true });
-      }
       // Zero out all candidate vote counts
       const candidatesSnap = await getDocs(collection(db, 'posts', postId, 'candidates'));
       candidatesSnap.forEach(c => batch.update(c.ref, { voteCount: 0 }));
@@ -240,7 +245,7 @@ export default function AdminPage() {
     try {
       const batch = writeBatch(db);
       // Close the election
-      batch.set(doc(db, 'election', 'state'), { isOpen: false, activePostId: null });
+      batch.set(doc(db, 'election', 'state'), { isOpen: false });
       // Reset every post and its candidates
       for (const post of posts) {
         batch.update(doc(db, 'posts', post.id), { status: 'pending' });
@@ -366,7 +371,7 @@ export default function AdminPage() {
                   <CardTitle className="flex items-center gap-3 text-xl">
                     <BoxSelect className="w-5 h-5 text-primary" /> Voting Booths
                   </CardTitle>
-                  <CardDescription>Minimum 3 booths. Auto-unlock 5 s after each vote.</CardDescription>
+                  <CardDescription>Assign a position to each booth. Multiple booths can run the same position simultaneously.</CardDescription>
                 </div>
                 <Button size="sm" onClick={handleAddBooth} data-testid="button-add-booth">
                   <Plus className="w-4 h-4 mr-1.5" /> Add Booth
@@ -374,40 +379,75 @@ export default function AdminPage() {
               </CardHeader>
               <CardContent className="p-6">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {booths.sort((a, b) => a.id.localeCompare(b.id)).map(booth => (
-                    <div key={booth.id} className={`p-5 rounded-xl border-2 transition-all ${booth.unlocked ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
-                      <div className="flex items-center justify-between mb-4">
-                        <span className="font-bold text-lg text-slate-900 uppercase tracking-widest">{booth.id}</span>
-                        <div className="flex items-center gap-2">
-                          {booth.unlocked
-                            ? <Badge className="bg-emerald-500 text-white border-0">Unlocked</Badge>
-                            : <Badge variant="outline" className="text-slate-500 border-slate-300">Locked</Badge>}
-                          {booths.length > 3 && (
-                            <button
-                              className="text-slate-300 hover:text-rose-500 transition-colors"
-                              onClick={() => handleDeleteBooth(booth.id)}
-                              title="Remove booth"
-                              data-testid={`button-delete-${booth.id}`}
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
+                  {booths.sort((a, b) => a.id.localeCompare(b.id)).map(booth => {
+                    const assignedPost = posts.find(p => p.id === booth.assignedPostId);
+                    return (
+                      <div key={booth.id} className={`p-5 rounded-xl border-2 transition-all ${booth.unlocked ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="font-bold text-lg text-slate-900 uppercase tracking-widest">{booth.id}</span>
+                          <div className="flex items-center gap-2">
+                            {booth.unlocked
+                              ? <Badge className="bg-emerald-500 text-white border-0">Unlocked</Badge>
+                              : <Badge variant="outline" className="text-slate-500 border-slate-300">Locked</Badge>}
+                            {booths.length > 3 && (
+                              <button
+                                className="text-slate-300 hover:text-rose-500 transition-colors"
+                                onClick={() => handleDeleteBooth(booth.id)}
+                                title="Remove booth"
+                                data-testid={`button-delete-${booth.id}`}
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Post assignment */}
+                        <div className="mb-3">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1 block">Assigned Position</label>
+                          <Select
+                            value={booth.assignedPostId ?? '__none__'}
+                            onValueChange={v => handleAssignPost(booth.id, v === '__none__' ? null : v)}
+                          >
+                            <SelectTrigger className="h-9 bg-white text-sm" data-testid={`select-post-${booth.id}`}>
+                              <SelectValue placeholder="— None —" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">— None —</SelectItem>
+                              {posts.map(p => (
+                                <SelectItem key={p.id} value={p.id}>
+                                  <span className="flex items-center gap-2">
+                                    <span className="text-slate-400 font-mono text-xs">{p.order}.</span>
+                                    {p.title}
+                                    {p.status === 'active' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />}
+                                  </span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {assignedPost && (
+                            <p className="text-xs mt-1 font-medium truncate"
+                              style={{ color: assignedPost.status === 'active' ? '#10b981' : assignedPost.status === 'closed' ? '#94a3b8' : '#64748b' }}>
+                              {assignedPost.status === 'active' ? '● Voting live' : assignedPost.status === 'closed' ? '✓ Closed' : '○ Not started'}
+                            </p>
                           )}
                         </div>
+
+                        <div className="flex gap-2">
+                          <Button size="sm" className="flex-1" disabled={booth.unlocked}
+                            onClick={() => updateDoc(doc(db, 'booths', booth.id), { unlocked: true })}
+                            data-testid={`button-unlock-${booth.id}`}>
+                            <Unlock className="w-3.5 h-3.5 mr-1.5" /> Unlock
+                          </Button>
+                          <Button size="sm" variant="secondary" className="flex-1" disabled={!booth.unlocked}
+                            onClick={() => updateDoc(doc(db, 'booths', booth.id), { unlocked: false })}
+                            data-testid={`button-lock-${booth.id}`}>
+                            <Lock className="w-3.5 h-3.5 mr-1.5" /> Lock
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <Button size="sm" className="flex-1" disabled={booth.unlocked}
-                          onClick={() => updateDoc(doc(db, 'booths', booth.id), { unlocked: true })}
-                          data-testid={`button-unlock-${booth.id}`}>
-                          <Unlock className="w-3.5 h-3.5 mr-1.5" /> Unlock
-                        </Button>
-                        <Button size="sm" variant="secondary" className="flex-1" disabled={!booth.unlocked}
-                          onClick={() => updateDoc(doc(db, 'booths', booth.id), { unlocked: false })}
-                          data-testid={`button-lock-${booth.id}`}>
-                          <Lock className="w-3.5 h-3.5 mr-1.5" /> Lock
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
@@ -450,7 +490,8 @@ export default function AdminPage() {
                   {posts.map(post => {
                     const isActive = post.status === 'active';
                     const isClosed = post.status === 'closed';
-                    const anyActive = posts.some(p => p.status === 'active');
+                    // Count how many booths are assigned to this post
+                    const assignedCount = booths.filter(b => b.assignedPostId === post.id).length;
                     return (
                       <div key={post.id} className={`p-5 flex items-center justify-between transition-colors ${isActive ? 'bg-primary/5' : 'hover:bg-slate-50'}`}>
                         <div className="flex items-center gap-5">
@@ -459,20 +500,22 @@ export default function AdminPage() {
                           </div>
                           <div>
                             <h3 className={`text-lg font-bold ${isActive ? 'text-primary' : 'text-slate-900'}`}>{post.title}</h3>
-                            <div className="mt-1">
+                            <div className="mt-1 flex items-center gap-2">
                               {isActive && <Badge className="bg-emerald-500 hover:bg-emerald-600 text-xs">IN PROGRESS</Badge>}
                               {isClosed && <Badge variant="secondary" className="bg-slate-200 text-xs">COMPLETED</Badge>}
                               {post.status === 'pending' && <Badge variant="outline" className="text-slate-400 border-slate-300 text-xs">WAITING</Badge>}
+                              {assignedCount > 0 && (
+                                <span className="text-xs text-slate-400 font-mono">{assignedCount} booth{assignedCount > 1 ? 's' : ''}</span>
+                              )}
                             </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          {post.status === 'pending' && !anyActive && (
+                          {post.status === 'pending' && (
                             <>
                               <Button size="sm" className="font-bold uppercase tracking-wider"
                                 onClick={async () => {
                                   await updateDoc(doc(db, 'posts', post.id), { status: 'active' });
-                                  await setDoc(doc(db, 'election', 'state'), { activePostId: post.id }, { merge: true });
                                 }}
                                 data-testid={`button-start-${post.id}`}>
                                 <Play className="w-4 h-4 mr-1.5" /> Start Voting
@@ -493,7 +536,6 @@ export default function AdminPage() {
                             <Button variant="destructive" size="sm" className="font-bold uppercase tracking-wider"
                               onClick={async () => {
                                 await updateDoc(doc(db, 'posts', post.id), { status: 'closed' });
-                                await setDoc(doc(db, 'election', 'state'), { activePostId: null }, { merge: true });
                               }}
                               data-testid={`button-end-${post.id}`}>
                               <SquareSquare className="w-4 h-4 mr-1.5" /> End Voting

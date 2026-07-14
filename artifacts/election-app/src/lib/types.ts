@@ -14,11 +14,11 @@ export interface Candidate {
 
 export interface ElectionState {
   isOpen: boolean;
-  activePostId: string | null;
 }
 
 export interface Booth {
   id: string;
   unlocked: boolean;
+  assignedPostId: string | null;
   lastVoteAt: any; // Firestore Timestamp or null
 }
